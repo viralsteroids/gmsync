@@ -1,0 +1,22 @@
+
+cron:
+  # Существующий синк Exchange -> Gmail
+  - description: "Exchange → Gmail sync"
+    url: /tasks/sync
+    schedule: every 10 minutes
+    timezone: Europe/Tallinn
+    target: default       # сервис с почтовым синком (по умолчанию default)
+
+  # Глубокий синк Exchange -> Gmail (расширенное окно, реже)
+  - description: "Exchange → Gmail deep sync"
+    url: /tasks/sync_deep
+    schedule: every 1 hours
+    timezone: Europe/Tallinn
+    target: default
+
+  # Новый ежедневный чеклист в Telegram
+  - description: "Daily Telegram checklist"
+    url: /tasks/daily_checklist
+    schedule: every day 01:00
+    timezone: Europe/Tallinn
+    target: checklistbot  # наш новый сервис бота

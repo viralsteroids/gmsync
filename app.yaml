@@ -1,0 +1,32 @@
+runtime: python311
+
+entrypoint: gunicorn -b :$PORT --timeout 300 main:app
+
+instance_class: F1
+
+env_variables:
+
+
+  # Настройки окна синка (можешь потом подкрутить)
+  IMPORT_LAST_DAYS: "2"
+  DUPLICATE_CHECK_DAYS: "2"
+  SYNC_GRACE_MINUTES: "180"
+  # Более длинное окно для глубокого синка (раз в час)
+  DEEP_IMPORT_LAST_DAYS: "10"
+
+  # Содержимое token.json (ВНИМАНИЕ: тут должен быть реальный JSON из твоего token.json)
+  # Замените на реальные значения перед деплоем
+  GMAIL_TOKEN_JSON: |
+    {
+      "token": "YOUR_ACCESS_TOKEN_HERE",
+      "refresh_token": "YOUR_REFRESH_TOKEN_HERE",
+      "token_uri": "https://oauth2.googleapis.com/token",
+      "client_id": "YOUR_CLIENT_ID_HERE",
+      "client_secret": "YOUR_CLIENT_SECRET_HERE",
+      "scopes": [
+        "https://www.googleapis.com/auth/gmail.modify",
+        "https://www.googleapis.com/auth/gmail.insert",
+        "https://www.googleapis.com/auth/gmail.readonly"
+        ]
+     }
+

@@ -1,0 +1,10 @@
+service: checklistbot
+runtime: python311
+
+entrypoint: gunicorn -b :$PORT bot:app
+
+env_variables:
+  BOT_TOKEN: "YOUR_BOT_TOKEN_HERE"  # Замените на реальный токен перед деплоем
+  CHAT_ID: "YOUR_CHAT_ID_HERE"  # группа для ежедневного чеклиста
+  TZ_NAME: "Europe/Tallinn"
+  APP_BASE_URL: "YOUR_APP_BASE_URL_HERE"  # Замените на реальный URL перед деплоем
