@@ -213,12 +213,12 @@ def create_and_send_checklist(chat_id: int, use_premium: bool = True) -> None:
                 print(f"⚠️ Не удалось закрепить сообщение: {error_desc}")
 
 
-def check_and_remind_progress(chat_id: int) -> None:
-    """Проверяет прогресс по чеклисту и отправляет интерактивный чеклист с текущим состоянием."""
+def check_and_mark_items(chat_id: int) -> None:
+    """Автоматически отмечает все пункты (кроме SKIP_ON_SCHEDULED_CHECK) как выполненные."""
     global LAST_CHECKLIST_MSG_ID
 
     if LAST_CHECKLIST_MSG_ID is None:
-        print("⚠️ Нет сохранённого ID чеклиста для проверки прогресса")
+        print("⚠️ Нет сохранённого ID чеклиста")
         return
 
     states = CHECKLIST_STATE.get(LAST_CHECKLIST_MSG_ID)
@@ -226,30 +226,26 @@ def check_and_remind_progress(chat_id: int) -> None:
         print(f"⚠️ Состояние чеклиста {LAST_CHECKLIST_MSG_ID} не найдено")
         return
 
-    # Считаем невыполненные пункты (кроме тех, что в SKIP_ON_SCHEDULED_CHECK)
-    uncompleted_count = 0
-    for done, title in zip(states, CHECKLIST_TEMPLATE):
-        if not done and title not in SKIP_ON_SCHEDULED_CHECK:
-            uncompleted_count += 1
+    # Отмечаем все пункты как выполненные (кроме тех, что в SKIP_ON_SCHEDULED_CHECK)
+    changed = False
+    for idx, title in enumerate(CHECKLIST_TEMPLATE):
+        if title not in SKIP_ON_SCHEDULED_CHECK and not states[idx]:
+            states[idx] = True
+            changed = True
 
-    if uncompleted_count == 0:
-        print("✅ Все ежедневные пункты выполнены!")
+    if not changed:
+        print("✅ Все ежедневные пункты уже отмечены!")
         return
 
-    # Отправляем интерактивный чеклист с текущим состоянием
-    now = datetime.now(TZ)
-    time_str = now.strftime("%H:%M")
+    # Обновляем сообщение с чеклистом
+    new_text = render_checklist_text(states, premium=True)
+    new_kb = build_keyboard(states)
 
-    text = render_checklist_text(states, premium=True)
-    # Добавляем заголовок напоминания
-    text = f"⏰ <b>Проверка ({time_str})</b>\n\n" + text
-
-    keyboard = build_keyboard(states)
-    msg_id = send_message(chat_id, text, reply_markup=keyboard, parse_mode="HTML")
-
-    if msg_id:
-        # Сохраняем состояние для нового сообщения (ссылаемся на те же states)
-        CHECKLIST_STATE[msg_id] = states
+    try:
+        edit_message(chat_id, LAST_CHECKLIST_MSG_ID, new_text, new_kb)
+        print(f"✅ Чеклист обновлён, все пункты отмечены")
+    except Exception as e:
+        print(f"⚠️ Не удалось обновить чеклист: {e}")
 
 
 # ===== Обработка апдейтов Telegram =====
@@ -374,17 +370,17 @@ def daily_checklist():
 
 @app.get("/tasks/check_progress")
 def check_progress():
-    """Эндпоинт для cron: проверяет прогресс и отправляет напоминание."""
+    """Эндпоинт для cron: автоматически отмечает все пункты в чеклисте."""
     now = datetime.now(TZ)
     time_str = now.strftime("%H:%M")
 
-    print(f"=== CHECK PROGRESS ({time_str}) ===")
+    print(f"=== CHECK & MARK ({time_str}) ===")
     try:
-        check_and_remind_progress(CHAT_ID)
-        print(f"=== CHECK PROGRESS END ({time_str}) ===")
+        check_and_mark_items(CHAT_ID)
+        print(f"=== CHECK & MARK END ({time_str}) ===")
         return "ok", 200
     except Exception as e:
-        print(f"❌ Error checking progress: {e}")
+        print(f"❌ Error marking items: {e}")
         return f"Error: {e}", 500
 
 
