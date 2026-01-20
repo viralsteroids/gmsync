@@ -1,0 +1,6 @@
+Flask
+gunicorn
+exchangelib
+google-api-python-client
+google-auth
+requests
