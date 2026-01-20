@@ -214,7 +214,7 @@ def create_and_send_checklist(chat_id: int, use_premium: bool = True) -> None:
 
 
 def check_and_remind_progress(chat_id: int) -> None:
-    """Проверяет прогресс по чеклисту и отправляет напоминание о невыполненных пунктах."""
+    """Проверяет прогресс по чеклисту и отправляет интерактивный чеклист с текущим состоянием."""
     global LAST_CHECKLIST_MSG_ID
 
     if LAST_CHECKLIST_MSG_ID is None:
@@ -226,27 +226,30 @@ def check_and_remind_progress(chat_id: int) -> None:
         print(f"⚠️ Состояние чеклиста {LAST_CHECKLIST_MSG_ID} не найдено")
         return
 
-    # Собираем невыполненные пункты (кроме тех, что в SKIP_ON_SCHEDULED_CHECK)
-    uncompleted = []
+    # Считаем невыполненные пункты (кроме тех, что в SKIP_ON_SCHEDULED_CHECK)
+    uncompleted_count = 0
     for done, title in zip(states, CHECKLIST_TEMPLATE):
         if not done and title not in SKIP_ON_SCHEDULED_CHECK:
-            uncompleted.append(title)
+            uncompleted_count += 1
 
-    if not uncompleted:
+    if uncompleted_count == 0:
         print("✅ Все ежедневные пункты выполнены!")
         return
 
-    # Формируем напоминание
+    # Отправляем интерактивный чеклист с текущим состоянием
     now = datetime.now(TZ)
     time_str = now.strftime("%H:%M")
 
-    lines = [f"⏰ <b>Напоминание ({time_str})</b>", ""]
-    lines.append(f"Осталось выполнить ({len(uncompleted)}):")
-    for title in uncompleted:
-        lines.append(f"⬜ {title}")
+    text = render_checklist_text(states, premium=True)
+    # Добавляем заголовок напоминания
+    text = f"⏰ <b>Проверка ({time_str})</b>\n\n" + text
 
-    text = "\n".join(lines)
-    send_message(chat_id, text, parse_mode="HTML")
+    keyboard = build_keyboard(states)
+    msg_id = send_message(chat_id, text, reply_markup=keyboard, parse_mode="HTML")
+
+    if msg_id:
+        # Сохраняем состояние для нового сообщения (ссылаемся на те же states)
+        CHECKLIST_STATE[msg_id] = states
 
 
 # ===== Обработка апдейтов Telegram =====
