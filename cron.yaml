@@ -20,3 +20,17 @@ cron:
     schedule: every day 01:00
     timezone: Europe/Tallinn
     target: checklistbot  # наш новый сервис бота
+
+  # Проверка прогресса чеклиста в 14:00 GMT+3
+  - description: "Checklist progress check (14:00)"
+    url: /tasks/check_progress
+    schedule: every day 14:00
+    timezone: Europe/Moscow
+    target: checklistbot
+
+  # Проверка прогресса чеклиста в 20:00 GMT+3
+  - description: "Checklist progress check (20:00)"
+    url: /tasks/check_progress
+    schedule: every day 20:00
+    timezone: Europe/Moscow
+    target: checklistbot

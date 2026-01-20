@@ -59,8 +59,16 @@ CHECKLIST_TEMPLATE = [
     "Отбой ≤ 23:00",
 ]
 
+# Пункты, которые НЕ проверяются при scheduled check (не ежедневные)
+SKIP_ON_SCHEDULED_CHECK = {
+    "Сауна/горячая ванна (2 раза в неделю)",
+}
+
 # message_id -> список состояний пунктов чеклиста
 CHECKLIST_STATE: Dict[int, List[bool]] = {}
+
+# message_id последнего отправленного чеклиста (для проверки прогресса)
+LAST_CHECKLIST_MSG_ID: int | None = None
 
 # Время последней отправки чеклиста (для защиты от повторных отправок)
 LAST_CHECKLIST_SENT: datetime | None = None
@@ -174,6 +182,8 @@ def answer_callback_query(callback_query_id: str) -> None:
 
 def create_and_send_checklist(chat_id: int, use_premium: bool = True) -> None:
     """Создаёт и отправляет новый чеклист в чат с премиум-форматированием."""
+    global LAST_CHECKLIST_MSG_ID
+
     states = [False] * len(CHECKLIST_TEMPLATE)
     text = render_checklist_text(states, premium=use_premium)
     keyboard = build_keyboard(states)
@@ -187,6 +197,7 @@ def create_and_send_checklist(chat_id: int, use_premium: bool = True) -> None:
         return
 
     CHECKLIST_STATE[msg_id] = states
+    LAST_CHECKLIST_MSG_ID = msg_id
 
     if PIN_MESSAGE:
         pin_result = tg_request("pinChatMessage", {
@@ -200,6 +211,42 @@ def create_and_send_checklist(chat_id: int, use_premium: bool = True) -> None:
                 print(f"ℹ️ Не удалось закрепить сообщение: у бота нет прав администратора в группе. Чеклист отправлен.")
             else:
                 print(f"⚠️ Не удалось закрепить сообщение: {error_desc}")
+
+
+def check_and_remind_progress(chat_id: int) -> None:
+    """Проверяет прогресс по чеклисту и отправляет напоминание о невыполненных пунктах."""
+    global LAST_CHECKLIST_MSG_ID
+
+    if LAST_CHECKLIST_MSG_ID is None:
+        print("⚠️ Нет сохранённого ID чеклиста для проверки прогресса")
+        return
+
+    states = CHECKLIST_STATE.get(LAST_CHECKLIST_MSG_ID)
+    if states is None:
+        print(f"⚠️ Состояние чеклиста {LAST_CHECKLIST_MSG_ID} не найдено")
+        return
+
+    # Собираем невыполненные пункты (кроме тех, что в SKIP_ON_SCHEDULED_CHECK)
+    uncompleted = []
+    for done, title in zip(states, CHECKLIST_TEMPLATE):
+        if not done and title not in SKIP_ON_SCHEDULED_CHECK:
+            uncompleted.append(title)
+
+    if not uncompleted:
+        print("✅ Все ежедневные пункты выполнены!")
+        return
+
+    # Формируем напоминание
+    now = datetime.now(TZ)
+    time_str = now.strftime("%H:%M")
+
+    lines = [f"⏰ <b>Напоминание ({time_str})</b>", ""]
+    lines.append(f"Осталось выполнить ({len(uncompleted)}):")
+    for title in uncompleted:
+        lines.append(f"⬜ {title}")
+
+    text = "\n".join(lines)
+    send_message(chat_id, text, parse_mode="HTML")
 
 
 # ===== Обработка апдейтов Telegram =====
@@ -319,6 +366,22 @@ def daily_checklist():
         return "ok", 200
     except Exception as e:
         print(f"❌ Error sending checklist: {e}")
+        return f"Error: {e}", 500
+
+
+@app.get("/tasks/check_progress")
+def check_progress():
+    """Эндпоинт для cron: проверяет прогресс и отправляет напоминание."""
+    now = datetime.now(TZ)
+    time_str = now.strftime("%H:%M")
+
+    print(f"=== CHECK PROGRESS ({time_str}) ===")
+    try:
+        check_and_remind_progress(CHAT_ID)
+        print(f"=== CHECK PROGRESS END ({time_str}) ===")
+        return "ok", 200
+    except Exception as e:
+        print(f"❌ Error checking progress: {e}")
         return f"Error: {e}", 500
 
 
