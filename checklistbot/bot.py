@@ -59,10 +59,30 @@ CHECKLIST_TEMPLATE = [
     "Отбой ≤ 23:00",
 ]
 
-# Пункты, которые НЕ проверяются при scheduled check (не ежедневные)
-SKIP_ON_SCHEDULED_CHECK = {
-    "Сауна/горячая ванна (2 раза в неделю)",
+# Пункты для автоматической отметки в 14:00 (утренние/дневные)
+CHECK_AT_14 = {
+    "Подъём ≤ 07:00",
+    "Стакан ГКВ (горячей кипяченой воды) натощак",
+    "БАДы",
+    "Зарядка",
+    "Завтрак",
+    "ГКВ между завтраком и обедом",
+    "Обед",
 }
+
+# Пункты для автоматической отметки в 20:00 (вечерние)
+CHECK_AT_20 = {
+    "Тренировка или прогулка",
+    "ГКВ между обедом и ужином",
+    "Ужин ≤ 18:00",
+    "Общий объём жидкости ≥ 2 л/сут",
+    "Вечерняя практика (растяжка, дыхание, медитация)",
+    "Ирригатор",
+}
+
+# НЕ отмечаются автоматически:
+# - "Сауна/горячая ванна (2 раза в неделю)" - не ежедневно
+# - "Отбой ≤ 23:00" - после 20:00
 
 # message_id -> список состояний пунктов чеклиста
 CHECKLIST_STATE: Dict[int, List[bool]] = {}
@@ -227,8 +247,8 @@ def get_pinned_message_id(chat_id: int) -> int | None:
     return None
 
 
-def check_and_mark_items(chat_id: int) -> None:
-    """Автоматически отмечает все пункты (кроме SKIP_ON_SCHEDULED_CHECK) как выполненные."""
+def check_and_mark_items(chat_id: int, items_to_check: set) -> None:
+    """Автоматически отмечает указанные пункты как выполненные (сохраняет ручные отметки)."""
     global LAST_CHECKLIST_MSG_ID
 
     # Пытаемся получить ID из памяти или из закреплённого сообщения
@@ -243,21 +263,24 @@ def check_and_mark_items(chat_id: int) -> None:
         print("⚠️ Нет сохранённого ID чеклиста и нет закреплённого сообщения")
         return
 
-    # Получаем состояние из памяти или создаём новое (все отмечены)
+    # Получаем состояние из памяти или создаём новое (все не отмечены)
     states = CHECKLIST_STATE.get(msg_id)
     if states is None:
-        # После рестарта приложения - создаём состояние где всё отмечено
-        states = [True] * len(CHECKLIST_TEMPLATE)
-        # Сауна остаётся не отмеченной
-        for idx, title in enumerate(CHECKLIST_TEMPLATE):
-            if title in SKIP_ON_SCHEDULED_CHECK:
-                states[idx] = False
+        # После рестарта приложения - создаём пустое состояние
+        states = [False] * len(CHECKLIST_TEMPLATE)
         CHECKLIST_STATE[msg_id] = states
-    else:
-        # Отмечаем все пункты как выполненные (кроме тех, что в SKIP_ON_SCHEDULED_CHECK)
-        for idx, title in enumerate(CHECKLIST_TEMPLATE):
-            if title not in SKIP_ON_SCHEDULED_CHECK:
-                states[idx] = True
+
+    # Отмечаем только указанные пункты (не снимаем ручные отметки!)
+    changed = False
+    for idx, title in enumerate(CHECKLIST_TEMPLATE):
+        if title in items_to_check and not states[idx]:
+            states[idx] = True
+            changed = True
+            print(f"  ✓ {title}")
+
+    if not changed:
+        print("✅ Все указанные пункты уже отмечены")
+        return
 
     # Обновляем сообщение с чеклистом
     new_text = render_checklist_text(states, premium=True)
@@ -265,7 +288,7 @@ def check_and_mark_items(chat_id: int) -> None:
 
     try:
         edit_message(chat_id, msg_id, new_text, new_kb)
-        print(f"✅ Чеклист {msg_id} обновлён, все пункты отмечены")
+        print(f"✅ Чеклист {msg_id} обновлён")
     except Exception as e:
         print(f"⚠️ Не удалось обновить чеклист: {e}")
 
@@ -390,16 +413,32 @@ def daily_checklist():
         return f"Error: {e}", 500
 
 
-@app.get("/tasks/check_progress")
-def check_progress():
-    """Эндпоинт для cron: автоматически отмечает все пункты в чеклисте."""
+@app.get("/tasks/check_14")
+def check_14():
+    """Эндпоинт для cron 14:00: отмечает утренние/дневные пункты."""
     now = datetime.now(TZ)
     time_str = now.strftime("%H:%M")
 
-    print(f"=== CHECK & MARK ({time_str}) ===")
+    print(f"=== CHECK 14:00 ({time_str}) ===")
     try:
-        check_and_mark_items(CHAT_ID)
-        print(f"=== CHECK & MARK END ({time_str}) ===")
+        check_and_mark_items(CHAT_ID, CHECK_AT_14)
+        print(f"=== CHECK 14:00 END ===")
+        return "ok", 200
+    except Exception as e:
+        print(f"❌ Error marking items: {e}")
+        return f"Error: {e}", 500
+
+
+@app.get("/tasks/check_20")
+def check_20():
+    """Эндпоинт для cron 20:00: отмечает вечерние пункты."""
+    now = datetime.now(TZ)
+    time_str = now.strftime("%H:%M")
+
+    print(f"=== CHECK 20:00 ({time_str}) ===")
+    try:
+        check_and_mark_items(CHAT_ID, CHECK_AT_20)
+        print(f"=== CHECK 20:00 END ===")
         return "ok", 200
     except Exception as e:
         print(f"❌ Error marking items: {e}")
