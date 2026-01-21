@@ -20,3 +20,17 @@ cron:
     schedule: every day 01:00
     timezone: Europe/Tallinn
     target: checklistbot  # наш новый сервис бота
+
+  # Автоматическая отметка утренних/дневных пунктов в 14:00 GMT+3
+  - description: "Checklist auto-check morning items (14:00)"
+    url: /tasks/check_14
+    schedule: every day 14:00
+    timezone: Europe/Moscow
+    target: checklistbot
+
+  # Автоматическая отметка вечерних пунктов в 20:00 GMT+3
+  - description: "Checklist auto-check evening items (20:00)"
+    url: /tasks/check_20
+    schedule: every day 20:00
+    timezone: Europe/Moscow
+    target: checklistbot

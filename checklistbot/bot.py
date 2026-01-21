@@ -59,8 +59,36 @@ CHECKLIST_TEMPLATE = [
     "Отбой ≤ 23:00",
 ]
 
+# Пункты для автоматической отметки в 14:00 (утренние/дневные)
+CHECK_AT_14 = {
+    "Подъём ≤ 07:00",
+    "Стакан ГКВ (горячей кипяченой воды) натощак",
+    "БАДы",
+    "Зарядка",
+    "Завтрак",
+    "ГКВ между завтраком и обедом",
+    "Обед",
+}
+
+# Пункты для автоматической отметки в 20:00 (вечерние)
+CHECK_AT_20 = {
+    "Тренировка или прогулка",
+    "ГКВ между обедом и ужином",
+    "Ужин ≤ 18:00",
+    "Общий объём жидкости ≥ 2 л/сут",
+    "Вечерняя практика (растяжка, дыхание, медитация)",
+    "Ирригатор",
+}
+
+# НЕ отмечаются автоматически:
+# - "Сауна/горячая ванна (2 раза в неделю)" - не ежедневно
+# - "Отбой ≤ 23:00" - после 20:00
+
 # message_id -> список состояний пунктов чеклиста
 CHECKLIST_STATE: Dict[int, List[bool]] = {}
+
+# message_id последнего отправленного чеклиста (для проверки прогресса)
+LAST_CHECKLIST_MSG_ID: int | None = None
 
 # Время последней отправки чеклиста (для защиты от повторных отправок)
 LAST_CHECKLIST_SENT: datetime | None = None
@@ -174,6 +202,8 @@ def answer_callback_query(callback_query_id: str) -> None:
 
 def create_and_send_checklist(chat_id: int, use_premium: bool = True) -> None:
     """Создаёт и отправляет новый чеклист в чат с премиум-форматированием."""
+    global LAST_CHECKLIST_MSG_ID
+
     states = [False] * len(CHECKLIST_TEMPLATE)
     text = render_checklist_text(states, premium=use_premium)
     keyboard = build_keyboard(states)
@@ -187,6 +217,7 @@ def create_and_send_checklist(chat_id: int, use_premium: bool = True) -> None:
         return
 
     CHECKLIST_STATE[msg_id] = states
+    LAST_CHECKLIST_MSG_ID = msg_id
 
     if PIN_MESSAGE:
         pin_result = tg_request("pinChatMessage", {
@@ -200,6 +231,66 @@ def create_and_send_checklist(chat_id: int, use_premium: bool = True) -> None:
                 print(f"ℹ️ Не удалось закрепить сообщение: у бота нет прав администратора в группе. Чеклист отправлен.")
             else:
                 print(f"⚠️ Не удалось закрепить сообщение: {error_desc}")
+
+
+def get_pinned_message_id(chat_id: int) -> int | None:
+    """Получает ID закреплённого сообщения в чате."""
+    data = tg_request("getChat", {"chat_id": chat_id})
+    if not data.get("ok"):
+        print(f"⚠️ Не удалось получить информацию о чате: {data}")
+        return None
+
+    chat_info = data.get("result", {})
+    pinned_msg = chat_info.get("pinned_message")
+    if pinned_msg:
+        return pinned_msg.get("message_id")
+    return None
+
+
+def check_and_mark_items(chat_id: int, items_to_check: set) -> None:
+    """Автоматически отмечает указанные пункты как выполненные (сохраняет ручные отметки)."""
+    global LAST_CHECKLIST_MSG_ID
+
+    # Пытаемся получить ID из памяти или из закреплённого сообщения
+    msg_id = LAST_CHECKLIST_MSG_ID
+    if msg_id is None:
+        msg_id = get_pinned_message_id(chat_id)
+        if msg_id:
+            print(f"📌 Найден закреплённый чеклист: {msg_id}")
+            LAST_CHECKLIST_MSG_ID = msg_id
+
+    if msg_id is None:
+        print("⚠️ Нет сохранённого ID чеклиста и нет закреплённого сообщения")
+        return
+
+    # Получаем состояние из памяти или создаём новое (все не отмечены)
+    states = CHECKLIST_STATE.get(msg_id)
+    if states is None:
+        # После рестарта приложения - создаём пустое состояние
+        states = [False] * len(CHECKLIST_TEMPLATE)
+        CHECKLIST_STATE[msg_id] = states
+
+    # Отмечаем только указанные пункты (не снимаем ручные отметки!)
+    changed = False
+    for idx, title in enumerate(CHECKLIST_TEMPLATE):
+        if title in items_to_check and not states[idx]:
+            states[idx] = True
+            changed = True
+            print(f"  ✓ {title}")
+
+    if not changed:
+        print("✅ Все указанные пункты уже отмечены")
+        return
+
+    # Обновляем сообщение с чеклистом
+    new_text = render_checklist_text(states, premium=True)
+    new_kb = build_keyboard(states)
+
+    try:
+        edit_message(chat_id, msg_id, new_text, new_kb)
+        print(f"✅ Чеклист {msg_id} обновлён")
+    except Exception as e:
+        print(f"⚠️ Не удалось обновить чеклист: {e}")
 
 
 # ===== Обработка апдейтов Telegram =====
@@ -319,6 +410,38 @@ def daily_checklist():
         return "ok", 200
     except Exception as e:
         print(f"❌ Error sending checklist: {e}")
+        return f"Error: {e}", 500
+
+
+@app.get("/tasks/check_14")
+def check_14():
+    """Эндпоинт для cron 14:00: отмечает утренние/дневные пункты."""
+    now = datetime.now(TZ)
+    time_str = now.strftime("%H:%M")
+
+    print(f"=== CHECK 14:00 ({time_str}) ===")
+    try:
+        check_and_mark_items(CHAT_ID, CHECK_AT_14)
+        print(f"=== CHECK 14:00 END ===")
+        return "ok", 200
+    except Exception as e:
+        print(f"❌ Error marking items: {e}")
+        return f"Error: {e}", 500
+
+
+@app.get("/tasks/check_20")
+def check_20():
+    """Эндпоинт для cron 20:00: отмечает вечерние пункты."""
+    now = datetime.now(TZ)
+    time_str = now.strftime("%H:%M")
+
+    print(f"=== CHECK 20:00 ({time_str}) ===")
+    try:
+        check_and_mark_items(CHAT_ID, CHECK_AT_20)
+        print(f"=== CHECK 20:00 END ===")
+        return "ok", 200
+    except Exception as e:
+        print(f"❌ Error marking items: {e}")
         return f"Error: {e}", 500
 
 
